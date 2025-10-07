@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>BadassBlaster — Play Now</title>
+<style>
+  html,body{{margin:0;padding:0;height:100%;background:linear-gradient(180deg,#000,#2b0040,#1c1c1c);color:#fff;font-family:Arial,Helvetica,sans-serif;overflow:hidden}}
+  #uiOverlay, #gameOverScreen{{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(0,0,0,0.75);z-index:30}}
+  #startBtn,button.small{{background:#bb86fc;color:#000;border:0;padding:12px 18px;border-radius:8px;font-weight:700;cursor:pointer}}
+  #cashBanner{{position:absolute;top:10px;right:10px;background:rgba(187,134,252,0.95);color:#000;padding:8px 12px;border-radius:10px;font-weight:700;z-index:25;cursor:pointer}}
+  #score{{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.45);padding:6px 10px;border-radius:8px;font-size:18px;z-index:20}}
+  #level{{position:absolute;left:120px;top:14px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;font-size:14px;z-index:20}}
+  canvas{{display:block;width:100%;height:100vh;background:transparent;touch-action:none}}
+  #credit{{position:absolute;bottom:8px;left:8px;font-size:13px;opacity:0.9;z-index:20}}
+  @media (orientation:landscape){{canvas{{height:100vh}}}}
+</style>
+</head>
+<body>
+  <div id="uiOverlay">
+    <h1 style="color:#bb86fc;margin:0 0 8px;font-size:28px">💥 BadassBlaster 💥</h1>
+    <p style="max-width:90%;text-align:center;margin:0 0 18px">Move or tilt your device to dodge & shoot. Click/tap to fire. Enemies speed up over time.</p>
+    <div style="display:flex;gap:12px">
+      <button id="startBtn">Start Game</button>
+      <button id="howBtn" class="small">How to Play</button>
+    </div>
+    <p style="margin-top:14px;font-size:13px;opacity:0.85">Made by @Therealcruz94</p>
+  </div>
+
+  <div id="cashBanner">$ Support Creator</div>
+  <div id="score">0</div>
+  <div id="level">Level 1</div>
+  <div id="credit">🎮 @Therealcruz94</div>
+
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+  <div id="gameOverScreen" style="display:none">
+    <h2 style="margin:0 0 10px">Game Over</h2>
+    <p id="finalScore" style="margin:0 0 12px">Score: 0</p>
+    <div style="display:flex;gap:10px">
+      <button id="restartBtn">Play Again</button>
+      <button id="menuBtn" class="small">Main Menu</button>
+    </div>
+  </div>
+
+  <div id="overlay" style="display:none;position:fixed;inset:0;z-index:40;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);color:#fff;flex-direction:column;padding:20px">
+    <p style="text-align:center">Support the creator on Cash App:<br><strong>https://cash.app/$badassking169</strong></p>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button id="openCash" class="small">Open Cash App</button>
+      <button id="closeOverlay" class="small">Close</button>
+    </div>
+  </div>
+
+<script>
+(() => { // isolate
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const howBtn = document.getElementById('howBtn');
+  const uiOverlay = document.getElementById('uiOverlay');
+  const cashBanner = document.getElementById('cashBanner');
+  const overlay = document.getElementById('overlay');
+  const openCash = document.getElementById('openCash');
+  const closeOverlay = document.getElementById('closeOverlay');
+  const scoreEl = document.getElementById('score');
+  const levelEl = document.getElementById('level');
+  const gameOverScreen = document.getElementById('gameOverScreen');
+  const finalScore = document.getElementById('finalScore');
+  const restartBtn = document.getElementById('restartBtn');
+  const menuBtn = document.getElementById('menuBtn');
+
+  let W = innerWidth, H = innerHeight;
+  function resize(){ W = innerWidth; H = innerHeight; canvas.width = W; canvas.height = H; }
+  addEventListener('resize', resize);
+  resize();
+
+  // Simple game state
+  let player, bullets, enemies, score, gameOver, lastSpawn, startTime;
+
+  class Player{
+    constructor(){ this.x = W/2; this.y = H - 80; this.r = Math.min(28, W*0.035); }
+    draw(){ ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fillStyle='#bb86fc'; ctx.fill(); }
+  }
+  class Bullet{ constructor(x,y){ this.x=x; this.y=y; this.r=5; this.s=12; } update(){ this.y -= this.s; } draw(){ ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); } }
+  class Enemy{ constructor(x,y,s){ this.x=x; this.y=y; this.r=Math.min(22, W*0.03); this.s=s; } update(){ this.y += this.s; } draw(){ ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fillStyle='#550080'; ctx.fill(); } }
+
+  function clamp(x,a,b){ return Math.max(a,Math.min(b,x)); }
+
+  function calcDifficulty(elapsedSec){ return Math.min(4, 1 + elapsedSec*0.06); }
+
+  function startGame(){
+    try{ if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape'); }catch(e){}
+    player = new Player();
+    bullets = [];
+    enemies = [];
+    score = 0;
+    gameOver = false;
+    lastSpawn = 0;
+    startTime = performance.now();
+    uiOverlay.style.display = 'none';
+    gameOverScreen.style.display = 'none';
+    scoreEl.textContent = '0';
+    levelEl.textContent = 'Level 1';
+    requestAnimationFrame(loop);
+  }
+
+  function loop(ts=0){
+    if(gameOver) return;
+    const elapsed = Math.floor((ts - startTime)/1000);
+    const diff = calcDifficulty(elapsed);
+
+    ctx.clearRect(0,0,W,H);
+    player.draw();
+
+    for(let i=bullets.length-1;i>=0;i--){ bullets[i].update(); bullets[i].draw(); if(bullets[i].y < -10) bullets.splice(i,1); }
+
+    const spawnInt = Math.max(220, 900 - elapsed*30);
+    if(!lastSpawn || ts - lastSpawn > spawnInt){
+      const x = Math.random()*(W-60)+30;
+      const base = 2 + Math.random()*2.2;
+      const speed = base * diff;
+      enemies.push(new Enemy(x,-40,speed));
+      lastSpawn = ts;
+    }
+
+    for(let ei=enemies.length-1; ei>=0; ei--){
+      const e = enemies[ei];
+      e.update(); e.draw();
+      const dxp = e.x - player.x, dyp = e.y - player.y;
+      if(Math.hypot(dxp,dyp) < e.r + player.r){ endGame(); return; }
+      for(let bi=bullets.length-1; bi>=0; bi--){
+        const b = bullets[bi];
+        const dx = e.x - b.x, dy = e.y - b.y;
+        if(Math.hypot(dx,dy) < e.r + b.r){
+          enemies.splice(ei,1); bullets.splice(bi,1); score++;
+          scoreEl.textContent = score;
+          levelEl.textContent = 'Level ' + (Math.floor(score/10)+1);
+          break;
+        }
+      }
+      if(e.y - e.r > H) enemies.splice(ei,1);
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(){
+    gameOver = true;
+    finalScore.textContent = 'Score: ' + score;
+    gameOverScreen.style.display = 'flex';
+    try{ if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }catch(e){}
+  }
+
+  canvas.addEventListener('click', (ev)=>{ if(gameOver) return; bullets.push(new Bullet(player.x, player.y - 30)); });
+  canvas.addEventListener('touchstart', (ev)=>{ if(gameOver) return; bullets.push(new Bullet(player.x, player.y - 30)); }, {passive:true});
+  canvas.addEventListener('mousemove', (ev)=>{ if(player) player.x = ev.clientX; });
+  canvas.addEventListener('touchmove', (ev)=>{ if(player && ev.touches && ev.touches[0]) player.x = ev.touches[0].clientX; }, {passive:true});
+  window.addEventListener('keydown', (e)=>{ if(gameOver) return; if(e.key==='ArrowLeft'||e.key==='a') player.x -= 30; if(e.key==='ArrowRight'||e.key==='d') player.x += 30; if(e.key===' ') bullets.push(new Bullet(player.x, player.y - 30)); });
+
+  function keepClamp(){ if(player){ player.x = clamp(player.x, player.r, W - player.r); } requestAnimationFrame(keepClamp); }
+  requestAnimationFrame(keepClamp);
+
+  startBtn.addEventListener('click', ()=>{ setTimeout(()=>{ startGame(); }, 60); });
+  howBtn.addEventListener('click', ()=>{ alert('Move mouse or finger to steer. Click/tap to shoot. Arrow keys/A-D to move. Space to shoot.'); });
+
+  cashBanner.addEventListener('click', ()=>{ overlay.style.display = 'flex'; });
+  openCash.addEventListener('click', ()=>{ window.open('https://cash.app/$badassking169','_blank'); });
+  closeOverlay.addEventListener('click', ()=>{ overlay.style.display = 'none'; });
+
+  restartBtn.addEventListener('click', ()=>{ startGame(); });
+  menuBtn.addEventListener('click', ()=>{ uiOverlay.style.display = 'flex'; gameOverScreen.style.display = 'none'; });
+
+  document.addEventListener('touchmove', (e)=>{ e.preventDefault(); }, {passive:false});
+})();
+</script>
+</body>
+</html>
